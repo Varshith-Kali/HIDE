@@ -163,18 +163,27 @@ def main():
                 if st.button("Post"):
                     # Save media and process only when Post is clicked
                     file_path = save_media(uploaded_file, st.session_state.username)
-                    st.success(f"Uploaded {uploaded_file.name} to {file_path}")
 
-                    # Generate secret data
-                    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    secret_data = f"Copyright_{st.session_state.username}_{current_time}"
+                    # Check if the uploaded image already contains hidden data
+                    try:
+                        hidden_data = decode(file_path)
+                        if hidden_data:
+                            st.error(f"Cannot post! This file already contains hidden data: {hidden_data}")
+                        else:
+                            # If no hidden data is found, proceed with encoding
+                            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            secret_data = f"Copyright_{st.session_state.username}_{current_time}"
 
-                    # Encode the secret data into the image
-                    encoded_file_path = f"media/{st.session_state.username}/encoded_{uploaded_file.name}"
-                    encode(file_path, secret_data, encoded_file_path)
+                            # Encode the secret data into the image
+                            encoded_file_path = f"media/{st.session_state.username}/encoded_{uploaded_file.name}"
+                            encode(file_path, secret_data, encoded_file_path)
 
-                    st.success("Post uploaded successfully with hidden data!")
-                    st.experimental_rerun()  # Reload or redirect to the Home page after posting
+                            st.success(f"Uploaded {uploaded_file.name} to {encoded_file_path}")
+                            st.success("Post uploaded successfully with hidden data!")
+                            st.experimental_rerun()  # Reload or redirect to the Home page after posting
+                    except Exception as e:
+                        st.error(f"Error while checking for hidden data: {str(e)}")
+
 
         # Display user's own posts after a successful post
         st.subheader("Your Posts")
@@ -224,6 +233,7 @@ def main():
                                 st.experimental_rerun()  # Reload page to reflect the deleted post
                             else:
                                 st.error(f"Failed to delete post {os.path.basename(post)}.")
+
 
     elif choice == "Profile" and st.session_state.username:
         st.subheader(f"Your Profile, {st.session_state.username}")
