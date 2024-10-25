@@ -1,8 +1,9 @@
+import os
 import streamlit as st
 from auth import register_user, login_user, init_db
 from profile_manager import create_profile, get_profile, update_profile
 from PIL import Image
-import os
+import glob
 from io import BytesIO
 import datetime
 from lsb import encode, decode
@@ -44,6 +45,34 @@ def get_user_posts(username):
 
     return user_posts
 
+
+def get_all_user_posts():
+    all_posts = []
+    media_root = "media"
+
+    # Check if media folder exists
+    if os.path.exists(media_root):
+        # Iterate over each user folder
+        for user_folder in os.listdir(media_root):
+            user_path = os.path.join(media_root, user_folder)
+
+            if os.path.isdir(user_path):
+                # Collect all image and video files for each user
+                for file in os.listdir(user_path):
+                    if file.endswith(('jpg', 'png', 'mp4')):
+                        file_path = os.path.join(user_path, file)
+                        # Append file path, creation time, and username (folder name)
+                        all_posts.append((file_path, os.path.getctime(file_path), user_folder))
+
+    # Sort posts by creation time, descending
+    if all_posts:
+        sorted_posts = sorted(all_posts, key=lambda x: x[1], reverse=True)
+        return [(post[0], post[2]) for post in sorted_posts]  # Return file path and username
+    else:
+        return []  # Return empty list if no posts found
+
+
+
 # Function to delete the selected post
 def delete_post(file_path):
     if os.path.exists(file_path):
@@ -64,7 +93,7 @@ def main():
 
     # Page access control: Only show Home, Profile, and Check Copyright if logged in
     if st.session_state.username:
-        menu = ["Home", "Profile", "Check Copyright", "Logout"]
+        menu = ["Home", "Profile", "Post", "Check Copyright", "Logout"]
     else:
         menu = ["Login", "Register"]
 
@@ -81,8 +110,10 @@ def main():
                 st.session_state.username = username  # Store the username in session
                 st.session_state.page = "Home"  # Redirect to Home on successful login
                 st.success(f"Welcome, {username}!")
+                st.rerun()  # Force the page to rerun and redirect to "Home"
             else:
                 st.error("Account not found. Please register or try again.")
+
 
     elif choice == "Register":
         st.subheader("Create New Account")
@@ -97,8 +128,43 @@ def main():
             st.session_state.page = "Home"  # Redirect to Home after successful registration
             st.success("Account Created and Profile Initialized!")
 
+
     elif choice == "Home" and st.session_state.username:
-        st.subheader(f"Welcome to HIDE, {st.session_state.username}!")
+        st.subheader("Feed - Latest Posts from All Users")
+
+        # Fetch all user posts and display in descending order by time
+        all_posts = get_all_user_posts()
+
+        if len(all_posts) == 0:
+            st.write("No posts available.")
+        else:
+            # Display posts in a grid
+            for i in range(0, len(all_posts), NUM_COLUMNS):
+                cols = st.columns(NUM_COLUMNS)
+
+                for idx, col in enumerate(cols):
+                    if i + idx < len(all_posts):
+                        post, username = all_posts[i + idx]
+
+                        # Display the image or video
+                        if post.endswith(('jpg', 'png')):
+                            col.image(post, width=200)
+                        elif post.endswith('mp4'):
+                            col.video(post)
+
+                        # Add "Posted by {username}" text below the post
+                        col.markdown(f'Posted by <span style="color:red;">{username}</span>', unsafe_allow_html=True)
+
+                        # Optionally, add a download button
+                        col.download_button(
+                            label="Download",
+                            data=open(post, "rb").read(),
+                            file_name=os.path.basename(post),
+                            mime="application/octet-stream"
+                        )
+
+    elif choice == "Post" and st.session_state.username:
+        st.subheader(f"Post your Moments...")
 
         # Section for multimedia upload (user's own post)
         uploaded_file = st.file_uploader("Upload Photo or Video", type=["jpg", "png", "mp4"])
@@ -113,12 +179,18 @@ def main():
                 if st.button("Post"):
                     # Save media and process only when Post is clicked
                     file_path = save_media(uploaded_file, st.session_state.username)
+                    # st.session_state.uploaded_file = None
+                    # st.rerun() 
                     
                     # Check if the uploaded image already contains hidden data
                     try:
                         hidden_data = decode(file_path)
                         if hidden_data[:11] == "Copyright_":
                             st.error(f"Cannot post! This file already contains hidden data: {hidden_data}")
+                            # encoded_file_path = f"media/{st.session_state.username}/encoded_{uploaded_file.name}"
+                            # if os.path.exists(file_path):
+                            #     os.rename(file_path, encoded_file_path) 
+                                
                         else:
                             # If no hidden data is found, proceed with encoding
                             current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -132,7 +204,7 @@ def main():
                             st.success(f"Uploaded {uploaded_file.name} to {encoded_file_path}")
                             st.success("Post uploaded successfully with hidden data!")
                             st.rerun()  # Reload or redirect to the Home page after posting
-                    except Exception as e:
+                    except Exception as e:  
                         st.error(f"Error while checking for hidden data: {str(e)}")
 
 
@@ -185,6 +257,8 @@ def main():
                             else:
                                 st.error(f"Failed to delete post {os.path.basename(post)}.")
 
+
+    
 
     elif choice == "Profile" and st.session_state.username:
         st.subheader(f"Your Profile, {st.session_state.username}")
