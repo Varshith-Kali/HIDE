@@ -154,6 +154,11 @@ def main():
 
                         # Add "Posted by {username}" text below the post
                         col.markdown(f'Posted by <span style="color:red;">{username}</span>', unsafe_allow_html=True)
+                        
+                        cred_user = decode(post).split("_")[1]
+
+                        if cred_user != username:
+                            col.markdown(f'Cred: <span style="color:red;">{cred_user}</span>', unsafe_allow_html=True)
 
                         # Optionally, add a download button
                         col.download_button(
@@ -185,8 +190,11 @@ def main():
                     # Check if the uploaded image already contains hidden data
                     try:
                         hidden_data = decode(file_path)
-                        if hidden_data[:11] == "Copyright_":
-                            st.error(f"Cannot post! This file already contains hidden data: {hidden_data}")
+                        if hidden_data[:10] == "Copyright_":
+                            # st.error(f"Cannot post! This file already contains hidden data: {hidden_data}")
+
+                            original_username = hidden_data.split("_")[1]
+                            st.info(f"This post belongs to {original_username}.")
                             # encoded_file_path = f"media/{st.session_state.username}/encoded_{uploaded_file.name}"
                             # if os.path.exists(file_path):
                             #     os.rename(file_path, encoded_file_path) 
