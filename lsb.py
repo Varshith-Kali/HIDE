@@ -23,7 +23,7 @@ def encode(img_path: str, data: str, new_img_name: str) -> None:
     image = Image.open(img_path, "r")
     new_image = image.copy()
     embed_data(new_image, data)
-    new_image.save(new_img_name, new_img_name.split(".")[-1].upper())
+    new_image.save(new_img_name, "PNG")
 
 
 def embed_data(image: Image.Image, data: str) -> None:
