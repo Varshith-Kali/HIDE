@@ -5,6 +5,7 @@ from PIL import Image
 import os
 from io import BytesIO
 import datetime
+from lsb import encode, decode
 
 # Initialize the database
 init_db()
@@ -49,57 +50,6 @@ def delete_post(file_path):
         os.remove(file_path)  # Remove the file from the server
         return True
     return False
-
-# Updated encoding function
-def encode(img_path: str, data: str, new_img_name: str) -> None:
-    if not data:
-        raise ValueError("Data is empty")
-    image = Image.open(img_path)
-    if image.mode != 'RGB':
-        image = image.convert('RGB')
-    encoded_image = embed_data(image, data)
-    encoded_image.save(new_img_name, format='PNG')
-
-# Updated decoding function
-def decode(img_path: str) -> str:
-    image = Image.open(img_path)
-    if image.mode != 'RGB':
-        image = image.convert('RGB')
-    width, height = image.size
-    binary_data = ""
-    for y in range(height):
-        for x in range(width):
-            pixel = list(image.getpixel((x, y)))
-            for color in pixel:
-                binary_data += str(color & 1)
-            if len(binary_data) >= 8 and binary_data[-8:] == '00000000':
-                break
-        if len(binary_data) >= 8 and binary_data[-8:] == '00000000':
-            break
-    decoded_data = ""
-    for i in range(0, len(binary_data) - 8, 8):
-        byte = binary_data[i:i+8]
-        decoded_data += chr(int(byte, 2))
-    return decoded_data.rstrip('\x00')
-
-# Updated helper function for embedding data
-def embed_data(image: Image.Image, data: str) -> Image.Image:
-    width, height = image.size
-    binary_data = ''.join(format(ord(char), '08b') for char in data) + '00000000'
-    data_index = 0
-    encoded_image = image.copy()
-    
-    for y in range(height):
-        for x in range(width):
-            pixel = list(encoded_image.getpixel((x, y)))
-            for color_channel in range(3):
-                if data_index < len(binary_data):
-                    pixel[color_channel] = (pixel[color_channel] & ~1) | int(binary_data[data_index])
-                    data_index += 1
-            encoded_image.putpixel((x, y), tuple(pixel))
-            if data_index >= len(binary_data):
-                return encoded_image
-    return encoded_image
 
 # Main application function
 def main():
@@ -163,11 +113,11 @@ def main():
                 if st.button("Post"):
                     # Save media and process only when Post is clicked
                     file_path = save_media(uploaded_file, st.session_state.username)
-
+                    
                     # Check if the uploaded image already contains hidden data
                     try:
                         hidden_data = decode(file_path)
-                        if hidden_data:
+                        if hidden_data[:11] == "Copyright_":
                             st.error(f"Cannot post! This file already contains hidden data: {hidden_data}")
                         else:
                             # If no hidden data is found, proceed with encoding
@@ -177,10 +127,11 @@ def main():
                             # Encode the secret data into the image
                             encoded_file_path = f"media/{st.session_state.username}/encoded_{uploaded_file.name}"
                             encode(file_path, secret_data, encoded_file_path)
+                            delete_post(f"media/{st.session_state.username}/{uploaded_file.name}")  # Delete the original file after encoding
 
                             st.success(f"Uploaded {uploaded_file.name} to {encoded_file_path}")
                             st.success("Post uploaded successfully with hidden data!")
-                            st.experimental_rerun()  # Reload or redirect to the Home page after posting
+                            st.rerun()  # Reload or redirect to the Home page after posting
                     except Exception as e:
                         st.error(f"Error while checking for hidden data: {str(e)}")
 
@@ -230,7 +181,7 @@ def main():
                         if col.button(f"Delete Post", key=f"delete_{i+idx}"):
                             if delete_post(post):
                                 st.success(f"Post {os.path.basename(post)} deleted successfully.")
-                                st.experimental_rerun()  # Reload page to reflect the deleted post
+                                st.rerun()  # Reload page to reflect the deleted post
                             else:
                                 st.error(f"Failed to delete post {os.path.basename(post)}.")
 
