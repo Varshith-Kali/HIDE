@@ -7,12 +7,17 @@ import glob
 from io import BytesIO
 import datetime
 from lsb import encode, decode
+import hashlib
+import uuid
 
 # Initialize the database
 init_db()
 
 # Define the number of columns per row for posts
 NUM_COLUMNS = 3
+
+def generate_unique_key():
+    return str(uuid.uuid4())
 
 # Dark Theme using custom CSS
 def load_css():
@@ -164,6 +169,7 @@ def main():
                         col.download_button(
                             label="Download",
                             data=open(post, "rb").read(),
+                            key = generate_unique_key(),
                             file_name=os.path.basename(post),
                             mime="application/octet-stream"
                         )
@@ -242,6 +248,7 @@ def main():
                         col.download_button(
                             label="Download",
                             data=open(post, "rb").read(),
+                            key = generate_unique_key(),
                             file_name=os.path.basename(post),
                             mime="application/octet-stream"
                         )
