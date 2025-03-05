@@ -6,12 +6,13 @@ from PIL import Image
 import glob
 from io import BytesIO
 import datetime
-from lsb import encode, decode
 import hashlib
 import uuid
+from steganography_api import SteganographyAPI, SteganographyError, VersionCompatibilityError, NoMessageFoundError
 
-# Initialize the database
+# Initialize the database and API client
 init_db()
+steg_api = SteganographyAPI("http://localhost:8080/api")  # Replace with your actual API URL
 
 # Define the number of columns per row for posts
 NUM_COLUMNS = 3
@@ -50,7 +51,6 @@ def get_user_posts(username):
 
     return user_posts
 
-
 def get_all_user_posts():
     all_posts = []
     media_root = "media"
@@ -76,8 +76,6 @@ def get_all_user_posts():
     else:
         return []  # Return empty list if no posts found
 
-
-
 # Function to delete the selected post
 def delete_post(file_path):
     if os.path.exists(file_path):
@@ -99,6 +97,7 @@ def main():
     # Page access control: Only show Home, Profile, and Check Copyright if logged in
     if st.session_state.username:
         menu = ["Home", "Profile", "Post", "Check Copyright", "Logout"]
+        st.markdown(f"<h3 style='text-align: left; color: white;'>User: {st.session_state.username}</h3>", unsafe_allow_html=True)
     else:
         menu = ["Login", "Register"]
 
@@ -119,7 +118,6 @@ def main():
             else:
                 st.error("Account not found. Please register or try again.")
 
-
     elif choice == "Register":
         st.subheader("Create New Account")
         new_username = st.text_input("New Username")
@@ -132,7 +130,6 @@ def main():
             st.session_state.username = new_username  # Automatically log in after registration
             st.session_state.page = "Home"  # Redirect to Home after successful registration
             st.success("Account Created and Profile Initialized!")
-
 
     elif choice == "Home" and st.session_state.username:
         st.subheader("Feed - Latest Posts from All Users")
@@ -160,16 +157,26 @@ def main():
                         # Add "Posted by {username}" text below the post
                         col.markdown(f'Posted by <span style="color:red;">{username}</span>', unsafe_allow_html=True)
                         
-                        cred_user = decode(post).split("_")[1]
-
-                        if cred_user != username:
-                            col.markdown(f'Cred: <span style="color:red;">{cred_user}</span>', unsafe_allow_html=True)
+                        # Use API to decode the image and show copyright info
+                        try:
+                            hidden_data = steg_api.decode(post)
+                            if hidden_data and hidden_data.startswith("Copyright_"):
+                                cred_user = hidden_data.split("_")[1]
+                                if cred_user != username:
+                                    col.markdown(f'Cred: <span style="color:red;">{cred_user}</span>', unsafe_allow_html=True)
+                        except NoMessageFoundError:
+                            pass  # No message found, just display the post normally
+                        except VersionCompatibilityError as e:
+                            # Optionally show a compatibility warning
+                            col.markdown(f'<span style="color:orange;">⚠️ Version incompatible</span>', unsafe_allow_html=True)
+                        except Exception:
+                            pass  # Silently ignore other errors when displaying the feed
 
                         # Optionally, add a download button
                         col.download_button(
                             label="Download",
                             data=open(post, "rb").read(),
-                            key = generate_unique_key(),
+                            key=generate_unique_key(),
                             file_name=os.path.basename(post),
                             mime="application/octet-stream"
                         )
@@ -190,37 +197,61 @@ def main():
                 if st.button("Post"):
                     # Save media and process only when Post is clicked
                     file_path = save_media(uploaded_file, st.session_state.username)
-                    # st.session_state.uploaded_file = None
-                    # st.rerun() 
                     
                     # Check if the uploaded image already contains hidden data
                     try:
-                        hidden_data = decode(file_path)
-                        if hidden_data[:10] == "Copyright_":
-                            # st.error(f"Cannot post! This file already contains hidden data: {hidden_data}")
-
+                        hidden_data = steg_api.decode(file_path)
+                        if hidden_data and hidden_data.startswith("Copyright_"):
                             original_username = hidden_data.split("_")[1]
                             st.info(f"This post belongs to {original_username}.")
-                            # encoded_file_path = f"media/{st.session_state.username}/encoded_{uploaded_file.name}"
-                            # if os.path.exists(file_path):
-                            #     os.rename(file_path, encoded_file_path) 
-                                
                         else:
-                            # If no hidden data is found, proceed with encoding
+                            # Proceed with encoding
                             current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             secret_data = f"Copyright_{st.session_state.username}_{current_time}"
 
-                            # Encode the secret data into the image
+                            # Encode the secret data into the image using the API
                             encoded_file_path = f"media/{st.session_state.username}/encoded_{uploaded_file.name}"
-                            encode(file_path, secret_data, encoded_file_path)
-                            delete_post(f"media/{st.session_state.username}/{uploaded_file.name}")  # Delete the original file after encoding
+                            
+                            # Use the API to encode the image
+                            result = steg_api.encode(file_path, secret_data)
+                            
+                            if result['status'] == 'success':
+                                # Download the encoded image from the API
+                                steg_api.download_image(result['image_id'], encoded_file_path)
+                                
+                                # Delete the original file after encoding
+                                delete_post(f"media/{st.session_state.username}/{uploaded_file.name}")
+                                
+                                st.success(f"Uploaded {uploaded_file.name} to {encoded_file_path}")
+                                st.success("Post uploaded successfully with hidden data!")
+                                st.rerun()  # Reload or redirect to the Home page after posting
+                            else:
+                                st.error(f"Error encoding image: {result.get('message', 'Unknown error')}")
+                    except VersionCompatibilityError:
+                        # No message found, proceed with encoding
+                        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        secret_data = f"Copyright_{st.session_state.username}_{current_time}"
 
+                        # Encode the secret data into the image using the API
+                        encoded_file_path = f"media/{st.session_state.username}/encoded_{uploaded_file.name}"
+                        
+                        # Use the API to encode the image
+                        result = steg_api.encode(file_path, secret_data)
+                        
+                        if result['status'] == 'success':
+                            # Download the encoded image from the API
+                            steg_api.download_image(result['image_id'], encoded_file_path)
+                            
+                            # Delete the original file after encoding
+                            delete_post(f"media/{st.session_state.username}/{uploaded_file.name}")
+                            
                             st.success(f"Uploaded {uploaded_file.name} to {encoded_file_path}")
                             st.success("Post uploaded successfully with hidden data!")
                             st.rerun()  # Reload or redirect to the Home page after posting
+                        else:
+                            st.error(f"Error encoding image: {result.get('message', 'Unknown error')}")
                     except Exception as e:  
                         st.error(f"Error while checking for hidden data: {str(e)}")
-
 
         # Display user's own posts after a successful post
         st.subheader("Your Posts")
@@ -248,7 +279,7 @@ def main():
                         col.download_button(
                             label="Download",
                             data=open(post, "rb").read(),
-                            key = generate_unique_key(),
+                            key=generate_unique_key(),
                             file_name=os.path.basename(post),
                             mime="application/octet-stream"
                         )
@@ -256,11 +287,13 @@ def main():
                         # Add a button to reveal hidden data
                         if col.button(f"Reveal Hidden Data", key=f"reveal_{i+idx}"):
                             try:
-                                hidden_data = decode(post)
+                                hidden_data = steg_api.decode(post)
                                 if hidden_data:
                                     st.info(f"Hidden data in this post: {hidden_data}")
-                                else:
-                                    st.warning("No hidden data found in this image.")
+                            except NoMessageFoundError:
+                                st.warning("No hidden data found in this image.")
+                            except VersionCompatibilityError as e:
+                                st.error(f"Version compatibility issue: {str(e)}")
                             except Exception as e:
                                 st.error(f"Error decoding data: {str(e)}")
 
@@ -271,9 +304,6 @@ def main():
                                 st.rerun()  # Reload page to reflect the deleted post
                             else:
                                 st.error(f"Failed to delete post {os.path.basename(post)}.")
-
-
-    
 
     elif choice == "Profile" and st.session_state.username:
         st.subheader(f"Your Profile, {st.session_state.username}")
@@ -303,7 +333,6 @@ def main():
             update_profile(st.session_state.username, name, bio, f"media/{st.session_state.username}/profile_pic.png")
             st.success("Profile Updated Successfully!")
 
-
     elif choice == "Check Copyright":
         st.subheader("Check for Copyright Data")
         
@@ -314,16 +343,28 @@ def main():
             img = Image.open(uploaded_file)
             st.image(img, caption="Uploaded Image", width=300)
             
-            # Decode and check for hidden data
+            # Save the uploaded file temporarily
+            temp_path = f"media/temp_{generate_unique_key()}.png"
+            img.save(temp_path)
+            
+            # Decode and check for hidden data using the API
             if st.button("Check for Hidden Data"):
                 try:
-                    hidden_data = decode(uploaded_file)
+                    hidden_data = steg_api.decode(temp_path)
                     if hidden_data:
                         st.success(f"Hidden data found: {hidden_data}")
-                    else:
-                        st.warning("No hidden data found.")
+                except NoMessageFoundError:
+                    st.warning("No hidden data found in this image. The image has not been encoded with any message.")
+                except VersionCompatibilityError as e:
+                    st.error(f"Version compatibility issue: {str(e)}")
+                    if e.version:
+                        st.info(f"The image was encoded with format version {e.version} which is incompatible with the current server.")
                 except Exception as e:
                     st.error(f"Error decoding image: {str(e)}")
+                finally:
+                    # Clean up temporary file
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
 
     elif choice == "Logout":
         # Handle logout by clearing session state
